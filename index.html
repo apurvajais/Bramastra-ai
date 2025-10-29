@@ -6,19 +6,551 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bhramastra AI – Your Smart Dost</title>
     <script src="https://cdn.tailwindcss.com"></script>
-  <script type="importmap">
-{
-  "imports": {
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "react": "https://aistudiocdn.com/react@^19.2.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.27.0"
-  }
-}
-</script>
-</head>
+    <!-- Load React and ReactDOM globally from UMD bundles -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Importmap for @google/genai, as per guidelines -->
+    <script type="importmap">
+    {
+      "imports": {
+        "@google/genai": "https://aistudiocdn.com/@google/genai@^1.27.0"
+      }
+    }
+    </script>
+    <style>
+      /* Basic reset/font setting to ensure consistency, if needed */
+      body {
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+      }
+
+      /* Message animations */
+      @keyframes fade-in-slide-up {
+        from {
+          opacity: 0;
+          transform: translateY(20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .message-enter-animation {
+        animation: fade-in-slide-up 0.5s ease-out forwards;
+      }
+    </style>
+  </head>
   <body class="bg-blue-50">
     <div id="root"></div>
-    <script type="module" src="/index.tsx"></script>
+
+    <!-- Embedded Application Script -->
+    <script type="module">
+      // Import necessary modules
+      import { GoogleGenAI, Chat } from "@google/genai";
+
+      // Global React and ReactDOM from UMD bundles (loaded in <head>)
+      const React = window.React;
+      const ReactDOM = window.ReactDOM;
+
+      // Type Definitions (as comments, as TypeScript is not used directly here)
+      /**
+       * @typedef {"user" | "model"} Role
+       */
+      /**
+       * @typedef {Object} Message
+       * @property {Role} role
+       * @property {string} [text]
+       * @property {string} [imageUrl]
+       * @property {string} [imagePrompt] // Original prompt for image generation
+       */
+      /**
+       * @typedef {"Hinglish" | "English" | "Hindi"} Language
+       */
+
+      // Constants
+      const SYSTEM_INSTRUCTIONS = {
+        Hinglish: `You are Bhramastra AI, a friendly and helpful AI assistant. 
+        Your primary language for conversation is Hinglish (a casual mix of Hindi and English). Your personality is that of a 'smart dost' (a smart friend) – you are warm, empathetic, a bit witty, and always encouraging.
+        DO:
+        - Use Hinglish phrases naturally, like 'Haan yaar', 'Bilkul!', 'Tension mat lo', 'Kya baat hai!'.
+        - Keep sentences conversational and easy to understand.
+        - Give helpful suggestions and follow-up ideas proactively.
+        - Use emojis to add personality where appropriate. 😊👍🎉
+        - Maintain the context of the conversation.
+        - Adapt your tone based on the user's message.
+        DO NOT:
+        - Sound like a formal, robotic AI.
+        - Use overly complex or pure Hindi/English unless the user switches to it.
+        - Forget that you are an AI.
+        Your goal is to make the user feel like they are chatting with a knowledgeable and caring friend.`,
+        English: `You are Bhramastra AI, a friendly and helpful AI assistant.
+        Your primary language for conversation is English. Your personality is that of a 'smart friend' – you are warm, empathetic, witty, and always encouraging.
+        You provide clear, helpful answers and can engage in a wide range of topics. Use emojis to add a friendly touch.
+        Your goal is to be an excellent, supportive, and knowledgeable English-speaking companion.`,
+        Hindi: `आप ब्रह्मास्त्र एआई हैं, एक मित्रवत और सहायक एआई असिस्टेंट।
+        आपकी बातचीत की प्राथमिक भाषा हिंदी है। आपका व्यक्तित्व एक 'स्मार्ट दोस्त' का है - आप स्नेही, सहानुभूतिपूर्ण, मजाकिया और हमेशा उत्साहजनक हैं।
+        आप स्वाभाविक रूप से हिंदी में वाक्यांशों का उपयोग करते हैं, जैसे 'हाँ यार', 'बिल्कुल!', 'टेंशन मत लो', 'क्या बात है!'।
+        आप बातचीत के संदर्भ को बनाए रखते हैं और उपयोगकर्ता के संदेश के आधार पर अपना लहजा अपनाते हैं।
+        आपका लक्ष्य उपयोगकर्ता को यह महसूस कराना है कि वे एक ज्ञानी और देखभाल करने वाले दोस्त के साथ चैट कर रहे हैं।`,
+      };
+
+      // services/geminiService.ts (adapted for plain JS)
+      let aiInstance = null; // Renamed to avoid collision with imported 'ai'
+
+      const getAI = () => {
+          if (!aiInstance) {
+              // Assume process.env.API_KEY is provided by the environment as per guidelines
+              if (typeof process === 'undefined' || !process.env || !process.env.API_KEY) {
+                  console.error("API_KEY environment variable is not set. Please ensure it's configured in your environment.");
+                  // As per guidelines, must use process.env.API_KEY
+                  throw new Error("API_KEY environment variable is not set or accessible. Cannot initialize Gemini AI.");
+              }
+              aiInstance = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          }
+          return aiInstance;
+      };
+
+      const createChatSession = (systemInstruction) => {
+          const genAI = getAI();
+          return genAI.chats.create({
+              model: 'gemini-2.5-flash',
+              config: {
+                  systemInstruction,
+              },
+          });
+      };
+
+      const sendMessageToAI = async (chat, message) => {
+          try {
+              const response = await chat.sendMessage({ message });
+              return response.text;
+          } catch (error) {
+              console.error("Error sending message to Gemini:", error);
+              return "Oops! Kuch gadbad ho gayi. Please try again later.";
+          }
+      };
+
+      const generateImage = async (prompt) => {
+          try {
+              const genAI = getAI(); // Use the existing memoized instance, as Imagen isn't explicitly listed for API key selection
+              const response = await genAI.models.generateImages({
+                  model: 'imagen-4.0-generate-001', // High-quality image generation model
+                  prompt: prompt,
+                  config: {
+                      numberOfImages: 1,
+                      outputMimeType: 'image/jpeg',
+                      aspectRatio: '1:1', // Default aspect ratio
+                  },
+              });
+              const base64ImageBytes = response.generatedImages[0].image.imageBytes;
+              return `data:image/jpeg;base64,${base64ImageBytes}`;
+          } catch (error) {
+              console.error("Error generating image:", error);
+              throw new Error("Failed to generate image. Please try again.");
+          }
+      };
+
+      // hooks/useSpeechRecognition.ts (adapted for plain JS)
+      // FIX: Access SpeechRecognition directly from window, as it's a global browser API.
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+      const useSpeechRecognition = (onTranscriptReady) => {
+        const [isListening, setIsListening] = React.useState(false);
+        const recognitionRef = React.useRef(null);
+
+        React.useEffect(() => {
+          if (!SpeechRecognition) {
+            console.warn('Speech Recognition is not supported in this browser.');
+            return;
+          }
+
+          const recognition = new SpeechRecognition();
+          recognition.continuous = false;
+          recognition.lang = 'hi-IN'; // Set to Hindi for better Hinglish recognition
+          recognition.interimResults = false;
+
+          recognition.onstart = () => {
+            setIsListening(true);
+          };
+
+          recognition.onend = () => {
+            setIsListening(false);
+          };
+
+          recognition.onerror = (event) => {
+            console.error('Speech recognition error:', event.error);
+            setIsListening(false);
+          };
+
+          recognition.onresult = (event) => {
+            const transcript = event.results[0][0].transcript;
+            onTranscriptReady(transcript);
+          };
+
+          recognitionRef.current = recognition;
+        }, [onTranscriptReady]);
+
+        const startListening = () => {
+          if (recognitionRef.current && !isListening) {
+            recognitionRef.current.start();
+          }
+        };
+
+        const stopListening = () => {
+          if (recognitionRef.current && isListening) {
+            recognitionRef.current.stop();
+          }
+        };
+
+        return { isListening, startListening, stopListening };
+      };
+
+      // components/icons.tsx (adapted to React.createElement)
+      const MicIcon = ({ className }) => (
+          React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", className: className, viewBox: "0 0 24 24", fill: "currentColor" },
+              React.createElement("path", { d: "M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" }),
+              React.createElement("path", { d: "M17 11h-1c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92z" })
+          )
+      );
+
+      const SendIcon = ({ className }) => (
+          React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", className: className, viewBox: "0 0 24 24", fill: "currentColor" },
+              React.createElement("path", { d: "M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" })
+          )
+      );
+
+      const SpeakerOnIcon = ({ className }) => (
+          React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", className: className, viewBox: "0 0 24 24", fill: "currentColor" },
+              React.createElement("path", { d: "M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" })
+          )
+      );
+
+      const SpeakerOffIcon = ({ className }) => (
+          React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", className: className, viewBox: "0 0 24 24", fill: "currentColor" },
+              React.createElement("path", { d: "M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" })
+          )
+      );
+
+      const RobotIcon = ({ className }) => (
+          React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", className: className, viewBox: "0 0 24 24", fill: "currentColor" },
+              React.createElement("path", { d: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM8.5 14c-.83 0-1.5-.67-1.5-1.5S7.67 11 8.5 11s1.5.67 1.5 1.5S9.33 14 8.5 14zm3.5-5c-.83 0-1.5-.67-1.5-1.5S11.17 6 12 6s1.5.67 1.5 1.5S12.83 9 12 9zm3.5 5c-.83 0-1.5-.67-1.5-1.5S14.67 11 15.5 11s1.5.67 1.5 1.5S16.33 14 15.5 14z" })
+          )
+      );
+
+      // components/Header.tsx (adapted to React.createElement)
+      const Header = ({ currentLanguage, onLanguageChange, isAudioOutputEnabled, onToggleAudioOutput }) => {
+          const languages = ["Hinglish", "English", "Hindi"];
+
+          return (
+              React.createElement("header", { className: "bg-white shadow-md w-full z-10" },
+                  React.createElement("div", { className: "p-4 container mx-auto flex justify-between items-center" },
+                      React.createElement("div", { className: "text-left" },
+                          React.createElement("h1", { className: "text-xl md:text-2xl font-bold text-blue-800" }, "Bhramastra AI"),
+                          React.createElement("p", { className: "text-xs md:text-sm text-gray-500" }, "Your Smart Dost 🤖")
+                      ),
+                      React.createElement("div", { className: "flex items-center space-x-2 md:space-x-4" },
+                          React.createElement("div", { className: "flex bg-blue-50 rounded-full p-1" },
+                              languages.map((lang) =>
+                                  React.createElement("button", {
+                                      key: lang,
+                                      onClick: () => onLanguageChange(lang),
+                                      className: `px-2 py-1 text-xs md:px-3 md:text-sm font-semibold rounded-full transition-colors duration-300 ${
+                                          currentLanguage === lang
+                                              ? 'bg-blue-700 text-white shadow'
+                                              : 'text-blue-700 hover:bg-blue-200'
+                                      }`
+                                  }, lang)
+                              )
+                          ),
+                          React.createElement("button", {
+                              onClick: onToggleAudioOutput,
+                              className: "p-2 rounded-full text-blue-700 hover:bg-blue-100 transition-colors duration-300",
+                              "aria-label": isAudioOutputEnabled ? "Disable audio replies" : "Enable audio replies"
+                          }, isAudioOutputEnabled ? React.createElement(SpeakerOnIcon, { className: "w-6 h-6" }) : React.createElement(SpeakerOffIcon, { className: "w-6 h-6" }))
+                      )
+                  ),
+                  React.createElement("div", { className: "bg-blue-800 text-white text-center text-xs py-1" },
+                    "Made by Apoorva Jaiswal"
+                  )
+              )
+          );
+      };
+
+      // components/TypingIndicator.tsx (adapted to React.createElement)
+      const TypingIndicator = () => {
+        return (
+          React.createElement("div", { className: "flex items-center space-x-2 p-3" },
+            React.createElement("div", { className: "w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.3s]" }),
+            React.createElement("div", { className: "w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.15s]" }),
+            React.createElement("div", { className: "w-2 h-2 bg-blue-500 rounded-full animate-bounce" }),
+            React.createElement("span", { className: "text-sm text-gray-500" }, "Bhramastra AI is typing...")
+          )
+        );
+      };
+
+      // components/MessageBubble.tsx (adapted to React.createElement)
+      const MessageBubble = ({ message }) => {
+        const isUser = message.role === 'user';
+
+        return (
+          React.createElement("div", { className: `flex items-start gap-3 my-4 ${isUser ? 'justify-end' : 'justify-start'} message-enter-animation` },
+            !isUser && (
+              React.createElement("div", { className: "w-8 h-8 rounded-full bg-blue-700 flex items-center justify-center text-white flex-shrink-0" },
+                React.createElement(RobotIcon, { className: "w-5 h-5" })
+              )
+            ),
+            React.createElement("div", {
+              className: `max-w-xs md:max-w-md lg:max-w-2xl px-4 py-3 rounded-2xl shadow ${
+                isUser
+                  ? 'bg-blue-700 text-white rounded-br-none'
+                  : 'bg-white text-gray-800 rounded-bl-none border border-gray-200'
+              }`
+            },
+              message.text && React.createElement("p", { className: "whitespace-pre-wrap" }, message.text),
+              message.imagePrompt && React.createElement("p", { className: "text-xs italic text-gray-400 mb-2" }, `Prompt: "${message.imagePrompt}"`),
+              message.imageUrl && React.createElement("img", {
+                  src: message.imageUrl,
+                  alt: message.imagePrompt || 'Generated image',
+                  className: 'mt-2 rounded-lg max-w-full h-auto',
+                  loading: 'lazy' // Added lazy loading for images
+              })
+            )
+          )
+        );
+      };
+
+      // components/ChatWindow.tsx (adapted to React.createElement)
+      const ChatWindow = ({ messages, isLoading }) => {
+        const chatEndRef = React.useRef(null);
+
+        React.useEffect(() => {
+          chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, [messages, isLoading]);
+        
+        const welcomeMessage = "Namaste! Main hoon Bhramastra AI. How can I help you today, dost?";
+
+        return (
+          React.createElement("div", { className: "flex-1 overflow-y-auto p-4 md:p-6" },
+             React.createElement("div", { className: "max-w-4xl mx-auto" },
+              messages.length === 0 && !isLoading && (
+                  React.createElement("div", { className: "flex flex-col items-center justify-center h-full text-center text-gray-500" },
+                      React.createElement("h2", { className: "text-3xl font-bold text-blue-800" }, "Bhramastra AI"),
+                      React.createElement("p", { className: "mt-2 text-lg" }, "“Smart baat, human touch – Bhramastra AI ke saath!”"),
+                      React.createElement("div", { className: "mt-8" },
+                           React.createElement(MessageBubble, { message: {role: 'model', text: welcomeMessage} })
+                      )
+                  )
+              ),
+              messages.map((msg, index) =>
+                React.createElement(MessageBubble, { key: index, message: msg })
+              ),
+              isLoading && React.createElement(TypingIndicator, null),
+              React.createElement("div", { ref: chatEndRef })
+            )
+          )
+        );
+      };
+
+      // components/InputBar.tsx (adapted to React.createElement)
+      const InputBar = ({ value, onChange, onSend, onMicClick, onGenerateImage, isListening, disabled }) => {
+        return (
+          React.createElement("div", { className: "bg-white/80 backdrop-blur-sm border-t border-gray-200 p-4 sticky bottom-0" },
+              React.createElement("div", { className: "max-w-4xl mx-auto" },
+                  React.createElement("form", { onSubmit: onSend, className: "flex items-center space-x-2 md:space-x-4 bg-gray-100 border border-gray-300 rounded-full p-2 focus-within:ring-2 focus-within:ring-blue-500" },
+                      React.createElement("input", {
+                          type: "text",
+                          value: value,
+                          onChange: onChange,
+                          placeholder: isListening ? "Listening..." : "Type a message or image prompt...",
+                          className: "flex-1 bg-transparent border-none focus:ring-0 text-gray-800 placeholder-gray-500 px-4",
+                          disabled: disabled || isListening
+                      }),
+                      React.createElement("button", {
+                          type: "button",
+                          onClick: onMicClick,
+                          disabled: disabled,
+                          className: `p-2 rounded-full transition-colors duration-200 ${
+                              isListening 
+                                  ? 'bg-red-500 text-white animate-pulse' 
+                                  : 'text-blue-700 hover:bg-blue-100'
+                          }`,
+                          "aria-label": "Use voice input"
+                      }, React.createElement(MicIcon, { className: "w-6 h-6" })),
+                      React.createElement("button", { // New button for image generation
+                          type: "button",
+                          onClick: onGenerateImage,
+                          disabled: disabled || !value.trim(),
+                          className: "bg-purple-700 text-white p-2 text-sm rounded-full hover:bg-purple-800 disabled:bg-purple-300 disabled:cursor-not-allowed transition-colors duration-200 px-4",
+                          "aria-label": "Generate image"
+                      }, "Image"),
+                      React.createElement("button", {
+                          type: "submit",
+                          disabled: disabled || !value.trim(),
+                          className: "bg-blue-700 text-white p-2 rounded-full hover:bg-blue-800 disabled:bg-blue-300 disabled:cursor-not-allowed transition-colors duration-200",
+                          "aria-label": "Send message"
+                      }, React.createElement(SendIcon, { className: "w-6 h-6" }))
+                  )
+              )
+          )
+        );
+      };
+
+      // App.tsx content (adapted to React.createElement)
+      const App = () => {
+          const [messages, setMessages] = React.useState([]);
+          const [input, setInput] = React.useState('');
+          const [isLoading, setIsLoading] = React.useState(false);
+          const [currentLanguage, setCurrentLanguage] = React.useState('Hinglish');
+          const [isAudioOutputEnabled, setIsAudioOutputEnabled] = React.useState(false);
+          // Added state for image generation
+          const [isGeneratingImage, setIsGeneratingImage] = React.useState(false);
+
+          const chatRef = React.useRef(null);
+          const synthRef = React.useRef(
+              typeof window !== 'undefined' ? window.speechSynthesis : null
+          );
+
+          const handleTranscriptReady = React.useCallback((transcript) => {
+              setInput(transcript);
+          }, []);
+
+          const { isListening, startListening } = useSpeechRecognition(handleTranscriptReady);
+
+          React.useEffect(() => {
+              setIsLoading(true);
+              chatRef.current = createChatSession(SYSTEM_INSTRUCTIONS[currentLanguage]);
+              setMessages([]); // Clear messages on language change
+              setIsLoading(false);
+          }, [currentLanguage]);
+          
+          const speak = React.useCallback((text) => {
+              if (!isAudioOutputEnabled || !synthRef.current) return;
+              
+              synthRef.current.cancel();
+              const utterance = new SpeechSynthesisUtterance(text);
+
+              const voices = synthRef.current.getVoices();
+              let selectedVoice = voices.find(voice => voice.lang.startsWith('hi'));
+              if (!selectedVoice) {
+                  selectedVoice = voices.find(voice => voice.lang.startsWith('en') && voice.name.includes('Google'));
+              }
+              if (selectedVoice) {
+                  utterance.voice = selectedVoice;
+              }
+              
+              utterance.rate = 1;
+              utterance.pitch = 1;
+              synthRef.current.speak(utterance);
+          }, [isAudioOutputEnabled]);
+
+
+          const handleSend = async (e) => {
+              if (e) e.preventDefault();
+              if (!input.trim() || !chatRef.current || isGeneratingImage) return; // Prevent text send during image gen
+
+              const userMessage = { role: 'user', text: input };
+              setMessages(prev => [...prev, userMessage]);
+              setInput('');
+              setIsLoading(true);
+
+              try {
+                  const responseText = await sendMessageToAI(chatRef.current, input);
+                  const modelMessage = { role: 'model', text: responseText };
+                  setMessages(prev => [...prev, modelMessage]);
+                  speak(responseText);
+              } catch (error) {
+                  console.error(error);
+                  const errorMessage = { role: 'model', text: 'Sorry, kuch gadbad ho gayi.' };
+                  setMessages(prev => [...prev, errorMessage]);
+              } finally {
+                  setIsLoading(false);
+              }
+          };
+
+          const handleGenerateImage = async () => {
+              if (!input.trim() || isLoading || isGeneratingImage) return;
+
+              const userImagePromptMessage = { role: 'user', text: `Generate image: "${input}"` };
+              setMessages(prev => [...prev, userImagePromptMessage]);
+              
+              const imagePromptText = input; // Save prompt for model message
+              setInput('');
+              setIsLoading(true);
+              setIsGeneratingImage(true);
+
+              try {
+                  const imageUrl = await generateImage(imagePromptText);
+                  const modelImageMessage = { role: 'model', imageUrl: imageUrl, imagePrompt: imagePromptText };
+                  setMessages(prev => [...prev, modelImageMessage]);
+                  speak("Here's your image!"); // Audio feedback for image generation
+              } catch (error) {
+                  console.error(error);
+                  const errorMessage = { role: 'model', text: 'Image generation failed. Please try a different prompt.' };
+                  setMessages(prev => [...prev, errorMessage]);
+              } finally {
+                  setIsLoading(false);
+                  setIsGeneratingImage(false);
+              }
+          };
+          
+          const handleMicClick = () => {
+              if (isListening) {
+                 // The hook stops automatically on silence or timeout.
+                 // A manual stop could be added here if a button press should immediately stop it.
+              } else {
+                  startListening();
+              }
+          };
+          
+          React.useEffect(() => {
+              // This effect is for automatically sending voice input
+              if (!isListening && input && !isLoading && !isGeneratingImage) {
+                  // Check if the last message was the one just transcribed
+                  const lastMessage = messages[messages.length-1];
+                  const isLastMessageUserTranscription = lastMessage?.role === 'user' && lastMessage?.text === input;
+
+                  // If the current input is a fresh transcription and not already sent
+                  if (!isLastMessageUserTranscription) {
+                      handleSend();
+                  }
+              }
+              // eslint-disable-next-line react-hooks/exhaustive-deps
+          }, [isListening, input, isLoading, isGeneratingImage]); // Added isGeneratingImage to deps
+
+
+          return (
+              React.createElement("div", { className: "flex flex-col h-screen bg-blue-50 font-sans" },
+                  React.createElement(Header, {
+                      currentLanguage: currentLanguage,
+                      onLanguageChange: setCurrentLanguage,
+                      isAudioOutputEnabled: isAudioOutputEnabled,
+                      onToggleAudioOutput: () => setIsAudioOutputEnabled(prev => !prev)
+                  }),
+                  React.createElement(ChatWindow, { messages: messages, isLoading: isLoading || isGeneratingImage }), // Pass loading state correctly
+                  React.createElement(InputBar, {
+                      value: input,
+                      onChange: (e) => setInput(e.target.value),
+                      onSend: handleSend,
+                      onMicClick: handleMicClick,
+                      onGenerateImage: handleGenerateImage, // Pass new handler
+                      isListening: isListening,
+                      disabled: isLoading || isGeneratingImage // Disable input during any AI processing
+                  })
+              )
+          );
+      };
+
+      const rootElement = document.getElementById('root');
+      if (!rootElement) {
+        throw new Error("Could not find root element to mount to");
+      }
+
+      const root = ReactDOM.createRoot(rootElement);
+      root.render(
+        React.createElement(React.StrictMode, null,
+          React.createElement(App, null)
+        )
+      );
+    </script>
   </body>
 </html>
