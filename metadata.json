@@ -1,0 +1,7 @@
+{
+  "name": "Copy of Bhramastra AI",
+  "description": "Bhramastra AI is an advanced Hinglish-speaking chatbot that chats like a real human friend. It understands both Hindi and English naturally, gives intelligent answers, and offers helpful suggestions.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
